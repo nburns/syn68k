@@ -200,6 +200,7 @@ AC_CONFIG_FILES([Makefile
                   profile/Makefile
                   runtime/Makefile
                   runtime/native/i386/Makefile
+                  runtime/native/null/Makefile
 		  include/syn68k_private.h])
 
 AC_OUTPUT

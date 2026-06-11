@@ -1,3 +1,4 @@
+build/
 *.[ao]
 config.mak
 autom4te.cache

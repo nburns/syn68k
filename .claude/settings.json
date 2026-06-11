@@ -1,0 +1,23 @@
+  {
+    "allowedTools": [
+      "Bash(make:*)",
+      "Bash(make install:*)",
+      "Bash(./autogen.sh:*)",
+      "Bash(./configure:*)",
+      "Bash(rg:*)",
+      "Bash(fd:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(diff:*)",
+      "Bash(gcc --version)",
+      "Bash(clang --version)",
+      "Bash(uname:*)",
+      "Bash(test/syngentest:*)",
+      "Bash(test/testall.sh:*)"
+    ]
+  }

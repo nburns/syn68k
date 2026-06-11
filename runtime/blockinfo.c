@@ -8,6 +8,25 @@
 #include <stdlib.h>
 #include <assert.h>
 
+/* On 64-bit, host pointers != Mac addresses, so we can't use (uint32)ptr
+   for Mac address arithmetic.  Use these helpers to read directly from
+   host-pointer code buffers and to convert host pointers to Mac addresses
+   without going through the SYN68K_TO_US/US_TO_SYN68K round-trip that the
+   compiler's optimizer breaks on 64-bit. */
+#if SIZEOF_CHAR_P == 8
+#  define READUW_HP(p)    SWAPUW_IFLE(*(const uint16 *)(p))
+#  define READSW_HP(p)    ((int16) SWAPUW_IFLE(*(const uint16 *)(p)))
+#  define READSL_HP(p)    ((int32) SWAPUL_IFLE(*(const uint32 *)(p)))
+#  define READUL_HP(p)    SWAPUL_IFLE(*(const uint32 *)(p))
+#  define HP_TO_MAC(p)    US_TO_SYN68K(p)
+#else
+#  define READUW_HP(p)    READUW(US_TO_SYN68K(p))
+#  define READSW_HP(p)    READSW(US_TO_SYN68K(p))
+#  define READSL_HP(p)    READSL(US_TO_SYN68K(p))
+#  define READUL_HP(p)    READUL(US_TO_SYN68K(p))
+#  define HP_TO_MAC(p)    ((uint32)(uintptr_t)(p))
+#endif
+
 static void determine_next_block_addresses (const uint16 *code,
 					    TempBlockInfo *temp,
 					    const OpcodeMappingInfo *map);
@@ -41,7 +60,7 @@ compute_block_info (Block *b, const uint16 *code, TempBlockInfo *temp)
       int insn_size;
       unsigned m68k_op;
 
-      m68k_op = READUW (US_TO_SYN68K (code));
+      m68k_op = READUW_HP (code);
       map = &opcode_map_info[opcode_map_index[m68k_op]];
 
 #if 0
@@ -105,7 +124,7 @@ static void
 determine_next_block_addresses (const uint16 *code, TempBlockInfo *temp,
 				const OpcodeMappingInfo *map)
 {
-  uint16 m68kop = READUW (US_TO_SYN68K (code));
+  uint16 m68kop = READUW_HP (code);
   BOOL is_bsr = ((m68kop >> 8) == 0x61);
   BOOL is_fixed_jsr = ((m68kop & 0xFFFE) == 0x4EB8   /* jsr abs{w,l}? */
 		       || m68kop == 0x4EBA);         /* jsr pc@d16?   */
@@ -126,22 +145,22 @@ determine_next_block_addresses (const uint16 *code, TempBlockInfo *temp,
     {
       uint32 t1, t2;
 
-      t1 = (uint32) (code + 1);
+      t1 = HP_TO_MAC (code + 1);
       /* Compute branch target. */
       if ((m68kop & 0xFF) == 0)
 	{
-	  t1 += READSW (US_TO_SYN68K (code + 1));
-	  t2 = (uint32) (code + 2);
+	  t1 += READSW_HP (code + 1);
+	  t2 = HP_TO_MAC (code + 2);
 	}
       else if ((m68kop & 0xFF) == 0xFF)
 	{
-	  t1 += READSL (US_TO_SYN68K (code + 1));
-	  t2 = (uint32) (code + 3);
+	  t1 += READSL_HP (code + 1);
+	  t2 = HP_TO_MAC (code + 3);
 	}
       else
 	{
 	  t1 += ((int8 *)code)[1];
-	  t2 = (uint32) (code + 1);
+	  t2 = HP_TO_MAC (code + 1);
 	}
 
       /* Is it a bsr or bra?  If so, only one destination address.  In the
@@ -164,7 +183,7 @@ determine_next_block_addresses (const uint16 *code, TempBlockInfo *temp,
   /* Is it a dbcc? */
   if ((m68kop >> 12) == 5)
     {
-      temp->child[0] = (uint32) (code + 2);
+      temp->child[0] = HP_TO_MAC (code + 2);
 
       if ((m68kop >> 8) == 0x50)  /* dbt? */
 	{
@@ -172,8 +191,7 @@ determine_next_block_addresses (const uint16 *code, TempBlockInfo *temp,
 	  return;
 	}
 
-      temp->child[1] = ((int32 ) (code + 1)
-			+ READSW (US_TO_SYN68K (code + 1)));
+      temp->child[1] = HP_TO_MAC (code + 1) + READSW_HP (code + 1);
       temp->num_child_blocks = 2;
       return;
     }
@@ -181,28 +199,26 @@ determine_next_block_addresses (const uint16 *code, TempBlockInfo *temp,
   switch (m68kop)
     {
     case 0x4EF8: /* Is it a jmp _abs.w? */
-      temp->child[0] = 
-	(uint32) SYN68K_TO_US (READSW (US_TO_SYN68K (code + 1)));
+      /* jmp abs.w: 16-bit sign-extended absolute Mac address */
+      temp->child[0] = (uint32)(int16) READSW_HP (code + 1);
       temp->num_child_blocks = 1;
       return;
     case 0x4EB8: /* Is it a jsr _abs.w? */
-      temp->child[0] =
-	(uint32) SYN68K_TO_US (READSW (US_TO_SYN68K (code + 1)));
+      temp->child[0] = (uint32)(int16) READSW_HP (code + 1);
       temp->num_child_blocks = 0;  /* Pretend we don't know the dest. */
       return;
     case 0x4EF9: /* Is it a jmp _abs.l? */
-      temp->child[0] = 
-	(uint32) SYN68K_TO_US (READUL (US_TO_SYN68K (code + 1)));
+      /* jmp abs.l: 32-bit absolute Mac address */
+      temp->child[0] = READUL_HP (code + 1);
       temp->num_child_blocks = 1;
       return;
     case 0x4EB9: /* Is it a jsr _abs.l? */
-      temp->child[0] = 
-	(uint32) SYN68K_TO_US (READUL (US_TO_SYN68K (code + 1)));
+      temp->child[0] = READUL_HP (code + 1);
       temp->num_child_blocks = 0;
       return;
     case 0x4EBA: /* Is it a pc-relative jsr? */
-      temp->child[0] = (uint32) ((READSW (US_TO_SYN68K (code + 1))
-				  + code + 1));
+      /* jsr pc@d16: target = HP_TO_MAC(code+1) + displacement */
+      temp->child[0] = HP_TO_MAC (code + 1) + READSW_HP (code + 1);
       temp->num_child_blocks = 0;
       return;
     }
@@ -210,7 +226,7 @@ determine_next_block_addresses (const uint16 *code, TempBlockInfo *temp,
   /* Strange, unknown block ender.  Probably something capable of trapping.
    * Assume that the subsequent instruction is the target.
    */
-  temp->child[0] = (uint32) (code + map->instruction_words);
+  temp->child[0] = HP_TO_MAC (code + map->instruction_words);
   temp->num_child_blocks = 1;
 }
 
@@ -218,7 +234,7 @@ determine_next_block_addresses (const uint16 *code, TempBlockInfo *temp,
 int
 amode_size (int amode, const uint16 *code, int ref_size)
 {
-  uint16 c = READUW (US_TO_SYN68K (code));
+  uint16 c = READUW_HP (code);
 
   switch (amode) {
   case 0x28: case 0x29: case 0x2A: case 0x2B:   /* Addressing mode 5 */
@@ -254,7 +270,7 @@ int
 instruction_size (const uint16 *code, const OpcodeMappingInfo *map)
 {
   int size;
-  int m68kop = READUW (US_TO_SYN68K (code));
+  int m68kop = READUW_HP (code);
   
   /* See if we have a conditional branch format operand instruction. */
   if ((m68kop >> 12) == 6)

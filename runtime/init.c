@@ -115,12 +115,16 @@ initialize_68k_emulator (void (*while_busy)(int), int native_p,
   generate_block (NULL, US_TO_SYN68K (&rte), &b, TRUE);
 #else
   {
-    typeof (ROMlib_offset) save_offset;
-
-    save_offset = ROMlib_offset;
-    ROMlib_offset = (uint64)(uintptr_t)&rte; /* so the RTE will be reachable with 32 bit addr */
-    generate_block (NULL, US_TO_SYN68K (&rte), &b, TRUE);
-    ROMlib_offset = save_offset;
+    /* On 64-bit, the RTE variable lives in the executor's data segment,
+       not in Mac address space.  Temporarily place the RTE instruction at
+       a known Mac address (0x80, in the low-global trap-vector area) so
+       that compute_block_info can read it using normal address translation. */
+    const uint32 tmp_mac_addr = 0x80;
+    uint16 *tmp_host = SYN68K_TO_US (tmp_mac_addr);
+    uint16 saved = *tmp_host;
+    *tmp_host = rte;
+    generate_block (NULL, tmp_mac_addr, &b, TRUE);
+    *tmp_host = saved;
   }
 #endif
   assert (b != NULL);
